@@ -13,8 +13,8 @@ ADMIN_ID = int(os.getenv('ADMIN_ID', '0'))
 bot = telebot.TeleBot(BOT_TOKEN)
 DATABASE = 'kinolar.db'
 
-# Majburiy obuna kanallari (username bo'lmasa @ bilan)
-REQUIRED_CHANNELS = ['@channel1', '@channel2']  # O'ZGARTIRING!
+# Majburiy obuna kanallari (ENDI DATABASE-DAN O'QILADI!)
+REQUIRED_CHANNELS = []  # Empty - database-dan o'qiladi
 
 # ============ DATABASE SOZLASH ============
 
@@ -64,6 +64,15 @@ def init_db():
         )
     ''')
     
+    # ✨ YANGI! Majburiy obuna kanallari
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS obuna_kanallari (
+            id INTEGER PRIMARY KEY,
+            channel_name TEXT UNIQUE NOT NULL,
+            sana TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
     conn.commit()
     conn.close()
 
@@ -99,7 +108,20 @@ def kino_topish(kod):
 
 def obunani_tekshir(user_id):
     """Foydalanuvchi majburiy kanallarga obuna qilganini tekshirish"""
-    for channel in REQUIRED_CHANNELS:
+    # Database-dan kanallarni o'qish
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT channel_name FROM obuna_kanallari')
+    channels = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    
+    # Agar kanal yo'q bo'lsa, hamma ruxsat
+    if not channels:
+        return True
+    
+    # Har bir kanalni tekshirish
+    for channel in channels:
         try:
             member = bot.get_chat_member(channel, user_id)
             # Agar obuna bo'lmasa
@@ -111,7 +133,17 @@ def obunani_tekshir(user_id):
 
 def obuna_xabari():
     """Majburiy obuna kanallari haqida xabar"""
-    channels_text = '\n'.join([f'👉 {ch}' for ch in REQUIRED_CHANNELS])
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT channel_name FROM obuna_kanallari')
+    channels = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    
+    if not channels:
+        return "Majburiy kanallar yo'q"
+    
+    channels_text = '\n'.join([f'👉 {ch}' for ch in channels])
     return f"""
 ❌ DIQQAT!
 
@@ -121,6 +153,61 @@ Bu botdan foydalanish uchun quyidagi kanallarga obuna bo'lish majburiy:
 
 Obuna bo'lgach, yana harakat qilib ko'ring.
 """
+
+def kanal_qosh(channel_name):
+    """Yangi kanal qo'shish"""
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    
+    # @ bilan yozilmagansa qo'shish
+    if not channel_name.startswith('@'):
+        channel_name = '@' + channel_name
+    
+    try:
+        cursor.execute('INSERT INTO obuna_kanallari (channel_name) VALUES (?)', (channel_name,))
+        conn.commit()
+        conn.close()
+        return True, f"✅ Kanal qo'shildi: {channel_name}"
+    except sqlite3.IntegrityError:
+        conn.close()
+        return False, f"⚠️ Kanal allaqachon mavjud: {channel_name}"
+    except Exception as e:
+        conn.close()
+        return False, f"❌ Xatolik: {str(e)}"
+
+def kanal_ochir(channel_name):
+    """Kanalni o'chirish"""
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    
+    # @ bilan yozilmagansa qo'shish
+    if not channel_name.startswith('@'):
+        channel_name = '@' + channel_name
+    
+    try:
+        cursor.execute('DELETE FROM obuna_kanallari WHERE channel_name = ?', (channel_name,))
+        conn.commit()
+        
+        if cursor.rowcount > 0:
+            conn.close()
+            return True, f"✅ Kanal o'chirildi: {channel_name}"
+        else:
+            conn.close()
+            return False, f"⚠️ Kanal topilmadi: {channel_name}"
+    except Exception as e:
+        conn.close()
+        return False, f"❌ Xatolik: {str(e)}"
+
+def kanallarni_ko_rish():
+    """Barcha kanallarni ko'rish"""
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT channel_name FROM obuna_kanallari ORDER BY sana DESC')
+    channels = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    
+    return channels
 
 def kategoriya_qosh(nomi):
     """Yangi kategoriya qo'shish"""
@@ -201,20 +288,45 @@ Masalan: 102
 @bot.message_handler(commands=['help'])
 def help_command(message):
     """Yordam buyrug'i"""
-    javob = """
+    if message.from_user.id == ADMIN_ID:
+        # Admin uchun extended help
+        javob = """
+📖 BOT QOLLASH (ADMIN):
+
+🎬 FOYDALANUVCHILAR UCHUN:
+/start - Botni boshlash
+/kategoriyalar - Kinolarni turkumlar bo'yicha ko'rish
+
+🎥 ADMIN - KINO BOSHQARISH:
+/upload - Kinodan yuklaydigan qilib qo'yish
+/toplamli - Barcha kinolar ro'yxati
+
+📻 ADMIN - OBUNA KANALLAR:
+/addchannel @name - Yangi kanal qo'shish
+/removechannel @name - Kanal o'chirish
+/channels - Barcha kanallarni ko'rish
+
+MISOL:
+/addchannel @my_channel
+/removechannel @old_channel
+        """
+    else:
+        # Oddiy foydalanuvchi uchun
+        javob = """
 📖 BOT QOLLASH:
 
 1️⃣ Kino kodini yozing (masalan: 102)
 2️⃣ Bot avtomatik tarzda kinoni yuboradi
 
 📂 Kategoriyalar:
-/kategoriyalar - Kinolarni turkumlari bo'yicha ko'rish
+/kategoriyalar - Kinolarni turkumlar bo'yicha ko'rish
 
-📊 Admin buyruqlari:
-/upload - Kino yuklaydigan qilib qo'yish
-/toplamli - Barcha kinolar ro'yxati
-/help - Bu xabar
-    """
+📌 Kino kodini qanday bilish?
+Instagram Reels-dan kino kodini ko'ring!
+
+/start - Botni qayta boshlash
+        """
+    
     bot.send_message(message.chat.id, javob)
 
 @bot.message_handler(commands=['upload'])
@@ -328,6 +440,84 @@ def show_categories(message):
     javob = "📂 KATEGORIYALAR:\n\n"
     for i, cat in enumerate(categories, 1):
         javob += f"{i}️⃣ /{cat.lower().replace(' ', '_')} - {cat}\n"
+    
+    bot.send_message(message.chat.id, javob)
+
+# ✨ YANGI! KANAL BOSHQARISH BUYRUQLARI
+
+@bot.message_handler(commands=['addchannel'])
+def add_channel(message):
+    """Admin: Yangi obuna kanali qo'shish"""
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "❌ Sizda bu buyruq uchun huquq yo'q!")
+        return
+    
+    # Buyruqdan kanal nomini olish: /addchannel @channel_name
+    text = message.text.strip()
+    parts = text.split()
+    
+    if len(parts) < 2:
+        bot.reply_to(message, """
+❌ Format xato!
+
+To'g'ri format:
+/addchannel @channel_name
+
+Misol:
+/addchannel @my_channel
+/addchannel channel_name
+        """)
+        return
+    
+    channel_name = parts[1]
+    success, msg = kanal_qosh(channel_name)
+    
+    bot.reply_to(message, msg)
+
+@bot.message_handler(commands=['removechannel'])
+def remove_channel(message):
+    """Admin: Obuna kanalini o'chirish"""
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "❌ Sizda bu buyruq uchun huquq yo'q!")
+        return
+    
+    # Buyruqdan kanal nomini olish: /removechannel @channel_name
+    text = message.text.strip()
+    parts = text.split()
+    
+    if len(parts) < 2:
+        bot.reply_to(message, """
+❌ Format xato!
+
+To'g'ri format:
+/removechannel @channel_name
+
+Misol:
+/removechannel @my_channel
+        """)
+        return
+    
+    channel_name = parts[1]
+    success, msg = kanal_ochir(channel_name)
+    
+    bot.reply_to(message, msg)
+
+@bot.message_handler(commands=['channels'])
+def show_channels(message):
+    """Admin: Barcha obuna kanallarini ko'rish"""
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "❌ Sizda bu buyruq uchun huquq yo'q!")
+        return
+    
+    channels = kanallarni_ko_rish()
+    
+    if not channels:
+        bot.reply_to(message, "📭 Majburiy obuna kanallari yo'q!")
+        return
+    
+    javob = "📻 MAJBURIY OBUNA KANALLARI:\n\n"
+    for i, ch in enumerate(channels, 1):
+        javob += f"{i}️⃣ {ch}\n"
     
     bot.send_message(message.chat.id, javob)
 
