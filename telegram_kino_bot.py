@@ -4,6 +4,7 @@ import os
 from dotenv import load_dotenv
 from pathlib import Path
 import json
+from telebot import types
 
 # .env faylidan token yuklash
 load_dotenv()
@@ -15,6 +16,31 @@ DATABASE = 'kinolar.db'
 
 # Majburiy obuna kanallari (ENDI DATABASE-DAN O'QILADI!)
 REQUIRED_CHANNELS = []  # Empty - database-dan o'qiladi
+
+# ============ ADMIN PANEL MENU ============
+
+def admin_menu():
+    """Admin uchun tugmali menu"""
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    
+    btn1 = types.KeyboardButton("🎬 Kino yuklash")
+    btn2 = types.KeyboardButton("📋 Kinolar ro'yxati")
+    btn3 = types.KeyboardButton("📻 Kanal qo'shish")
+    btn4 = types.KeyboardButton("🗑 Kanal o'chirish")
+    btn5 = types.KeyboardButton("📢 Kanallar ro'yxati")
+    btn6 = types.KeyboardButton("📊 Statistika")
+    btn7 = types.KeyboardButton("📂 Kategoriyalar")
+    btn8 = types.KeyboardButton("👤 Foydalanuvchi paneli")
+    
+    markup.add(btn1, btn2, btn3, btn4, btn5, btn6, btn7, btn8)
+    return markup
+
+def user_menu():
+    """Oddiy foydalanuvchi uchun menu (agar kerak bo'lsa)"""
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    btn1 = types.KeyboardButton("📂 Kategoriyalar")
+    markup.add(btn1)
+    return markup
 
 # ============ DATABASE SOZLASH ============
 
@@ -262,6 +288,17 @@ def start(message):
     user_name = message.from_user.first_name or "Foydalanuvchi"
     user_id = message.chat.id
     
+    # ADMIN bo'lsa - Admin panel menu
+    if user_id == ADMIN_ID:
+        javob = f"""
+👑 Assalomu alaykum ADMIN {user_name}!
+
+🎛 Admin panelga xush kelibsiz.
+Quyidagi tugmalardan foydalaning:
+        """
+        bot.send_message(user_id, javob, reply_markup=admin_menu())
+        return
+    
     # Obunani tekshirish
     if not obunani_tekshir(user_id):
         bot.send_message(user_id, obuna_xabari())
@@ -279,9 +316,6 @@ Masalan: 102
 
 📂 Kategoriyalar:
 /kategoriyalar - Barcha kinolar
-
-🔐 Admin:
-/upload - Kino yuklash (ADMIN)
     """
     bot.send_message(user_id, javob)
 
@@ -515,6 +549,129 @@ def show_channels(message):
         javob += f"{i}️⃣ {ch}\n"
     
     bot.send_message(message.chat.id, javob)
+
+# ============ ADMIN MENU TUGMALARI ============
+
+@bot.message_handler(func=lambda m: m.text == "🎬 Kino yuklash" and m.from_user.id == ADMIN_ID)
+def menu_upload(message):
+    """Menu: Kino yuklash tugmasi"""
+    upload_start(message)
+
+@bot.message_handler(func=lambda m: m.text == "📋 Kinolar ro'yxati" and m.from_user.id == ADMIN_ID)
+def menu_list_movies(message):
+    """Menu: Kinolar ro'yxatini ko'rsatish"""
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    cursor.execute('SELECT kod, nom, kategoriya FROM kinolar ORDER BY kod')
+    kinolar = cursor.fetchall()
+    conn.close()
+    
+    if not kinolar:
+        bot.send_message(message.chat.id, "📭 Kinolar bazasi bo'sh!")
+        return
+    
+    javob = "📽️ BARCHA KINOLAR:\n\n"
+    for kod, nom, kategoriya in kinolar:
+        javob += f"🎯 {kod}: {nom} ({kategoriya})\n"
+    
+    bot.send_message(message.chat.id, javob)
+
+@bot.message_handler(func=lambda m: m.text == "📻 Kanal qo'shish" and m.from_user.id == ADMIN_ID)
+def menu_add_channel(message):
+    """Menu: Kanal qo'shish"""
+    msg = bot.send_message(message.chat.id, """
+📻 Yangi kanal qo'shish
+
+Kanal username-ni yozing (masalan: @my_channel):
+    """)
+    bot.register_next_step_handler(msg, menu_add_channel_process)
+
+def menu_add_channel_process(message):
+    """Kanalni saqlash"""
+    channel_name = message.text.strip()
+    success, msg = kanal_qosh(channel_name)
+    bot.send_message(message.chat.id, msg, reply_markup=admin_menu())
+
+@bot.message_handler(func=lambda m: m.text == "🗑 Kanal o'chirish" and m.from_user.id == ADMIN_ID)
+def menu_remove_channel(message):
+    """Menu: Kanal o'chirish"""
+    channels = kanallarni_ko_rish()
+    
+    if not channels:
+        bot.send_message(message.chat.id, "📭 O'chiriladigan kanal yo'q!")
+        return
+    
+    javob = "🗑 O'chirmoqchi bo'lgan kanal username-ni yozing:\n\n"
+    for ch in channels:
+        javob += f"👉 {ch}\n"
+    
+    msg = bot.send_message(message.chat.id, javob)
+    bot.register_next_step_handler(msg, menu_remove_channel_process)
+
+def menu_remove_channel_process(message):
+    """Kanalni o'chirish"""
+    channel_name = message.text.strip()
+    success, msg = kanal_ochir(channel_name)
+    bot.send_message(message.chat.id, msg, reply_markup=admin_menu())
+
+@bot.message_handler(func=lambda m: m.text == "📢 Kanallar ro'yxati" and m.from_user.id == ADMIN_ID)
+def menu_channels_list(message):
+    """Menu: Kanallar ro'yxati"""
+    channels = kanallarni_ko_rish()
+    
+    if not channels:
+        bot.send_message(message.chat.id, "📭 Majburiy obuna kanallari yo'q!")
+        return
+    
+    javob = "📻 MAJBURIY OBUNA KANALLARI:\n\n"
+    for i, ch in enumerate(channels, 1):
+        javob += f"{i}️⃣ {ch}\n"
+    
+    bot.send_message(message.chat.id, javob)
+
+@bot.message_handler(func=lambda m: m.text == "📊 Statistika" and m.from_user.id == ADMIN_ID)
+def menu_statistics(message):
+    """Menu: Statistika ko'rsatish"""
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT COUNT(*) FROM kinolar')
+    jami_kinolar = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT COUNT(*) FROM foydalanuvchilar')
+    jami_foydalanuvchilar = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT SUM(kodlar_soni) FROM foydalanuvchilar')
+    jami_sorovlar = cursor.fetchone()[0] or 0
+    
+    cursor.execute('SELECT COUNT(*) FROM obuna_kanallari')
+    jami_kanallar = cursor.fetchone()[0]
+    
+    conn.close()
+    
+    javob = f"""
+📊 BOT STATISTIKASI:
+
+🎬 Jami kinolar: {jami_kinolar}
+👥 Jami foydalanuvchilar: {jami_foydalanuvchilar}
+🔢 Jami so'rovlar: {jami_sorovlar}
+📻 Jami majburiy kanallar: {jami_kanallar}
+    """
+    bot.send_message(message.chat.id, javob)
+
+@bot.message_handler(func=lambda m: m.text == "📂 Kategoriyalar" and m.from_user.id == ADMIN_ID)
+def menu_categories(message):
+    """Menu: Kategoriyalarni ko'rish"""
+    show_categories(message)
+
+@bot.message_handler(func=lambda m: m.text == "👤 Foydalanuvchi paneli" and m.from_user.id == ADMIN_ID)
+def menu_user_panel(message):
+    """Menu: Oddiy foydalanuvchi paneliga o'tish"""
+    bot.send_message(
+        message.chat.id, 
+        "👤 Foydalanuvchi paneliga o'tdingiz.\n\nKino kodini yozing.",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
 
 @bot.message_handler(commands=['toplamli'])
 def toplamli(message):
