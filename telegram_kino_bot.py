@@ -381,7 +381,7 @@ Video fayl yuklang:
     bot.register_next_step_handler(msg, upload_get_video, kino_nom, kino_kod, kategoriya)
 
 def upload_get_video(message, kino_nom, kino_kod, kategoriya):
-    """Video faylini olish"""
+    """Video faylini olish - 3GB gacha support!"""
     try:
         if message.video:
             file_id = message.video.file_id
@@ -396,10 +396,21 @@ def upload_get_video(message, kino_nom, kino_kod, kategoriya):
             if not os.path.exists('kinolar'):
                 os.makedirs('kinolar')
             
-            with open(f'kinolar/{fayl_nomi}', 'wb') as f:
+            # File path
+            file_path = f'kinolar/{fayl_nomi}'
+            
+            # Progress ko'rish
+            status_msg = bot.send_message(message.chat.id, f"📥 Fayl saqlanmoqda... (Bu vaqt olishi mumkin)")
+            
+            # Faylni save qilish
+            with open(file_path, 'wb') as f:
                 f.write(downloaded_file)
             
-            # Database-ga qo'shish
+            # Fayl hajmini olish
+            file_size = os.path.getsize(file_path)
+            file_size_mb = file_size / (1024 * 1024)
+            
+            # Database-ga qo'shish (fayl_nomi - local path)
             conn = sqlite3.connect(DATABASE)
             cursor = conn.cursor()
             
@@ -411,17 +422,27 @@ def upload_get_video(message, kino_nom, kino_kod, kategoriya):
             conn.commit()
             conn.close()
             
+            # Status xabarini o'chirish
+            try:
+                bot.delete_message(message.chat.id, status_msg.message_id)
+            except:
+                pass
+            
             bot.send_message(message.chat.id, f"""
 ✅ Kino muvaffaqiyatli yuklandi!
 
 📌 Kod: {kino_kod}
 🎬 Nom: {kino_nom}
 📂 Kategoriya: {kategoriya}
+📊 Fayl hajmi: {file_size_mb:.1f} MB
+
+Foydalanuvchi kino kodini yozsa, 
+bot kinodan yuboradi!
             """)
         else:
             bot.reply_to(message, "❌ Video fayli yuborish kerak!")
     except Exception as e:
-        bot.reply_to(message, f"❌ Xatolik: {str(e)}")
+        bot.reply_to(message, f"❌ Xatolik: {str(e)}\n\nEski video nomini yozing yoki qayta urinib ko'ring.")
 
 @bot.message_handler(commands=['kategoriyalar'])
 def show_categories(message):
