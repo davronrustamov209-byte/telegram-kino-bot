@@ -381,52 +381,26 @@ Video fayl yuklang:
     bot.register_next_step_handler(msg, upload_get_video, kino_nom, kino_kod, kategoriya)
 
 def upload_get_video(message, kino_nom, kino_kod, kategoriya):
-    """Video faylini olish - 3GB gacha support!"""
+    """Video faylini olish - FILE_ID saqlash (download qilmasdan!)"""
     try:
         if message.video:
+            # ✨ MUHIM: Faylni DOWNLOAD QILMAYMIZ!
+            # Faqat Telegram-ning file_id raqamini saqlaymiz
             file_id = message.video.file_id
-            file_info = bot.get_file(file_id)
+            file_size = message.video.file_size
+            file_size_mb = file_size / (1024 * 1024) if file_size else 0
             
-            # Fayl saqlab qo'yish
-            downloaded_file = bot.download_file(file_info.file_path)
-            
-            fayl_nomi = f"{kino_kod}_{kino_nom}.mp4"
-            
-            # kinolar papkasi yaratish
-            if not os.path.exists('kinolar'):
-                os.makedirs('kinolar')
-            
-            # File path
-            file_path = f'kinolar/{fayl_nomi}'
-            
-            # Progress ko'rish
-            status_msg = bot.send_message(message.chat.id, f"📥 Fayl saqlanmoqda... (Bu vaqt olishi mumkin)")
-            
-            # Faylni save qilish
-            with open(file_path, 'wb') as f:
-                f.write(downloaded_file)
-            
-            # Fayl hajmini olish
-            file_size = os.path.getsize(file_path)
-            file_size_mb = file_size / (1024 * 1024)
-            
-            # Database-ga qo'shish (fayl_nomi - local path)
+            # Database-ga qo'shish (fayl_nomi o'rniga file_id saqlanadi!)
             conn = sqlite3.connect(DATABASE)
             cursor = conn.cursor()
             
             cursor.execute('''
                 INSERT INTO kinolar (kod, nom, fayl_nomi, kategoriya)
                 VALUES (?, ?, ?, ?)
-            ''', (kino_kod, kino_nom, fayl_nomi, kategoriya))
+            ''', (kino_kod, kino_nom, file_id, kategoriya))
             
             conn.commit()
             conn.close()
-            
-            # Status xabarini o'chirish
-            try:
-                bot.delete_message(message.chat.id, status_msg.message_id)
-            except:
-                pass
             
             bot.send_message(message.chat.id, f"""
 ✅ Kino muvaffaqiyatli yuklandi!
@@ -442,7 +416,7 @@ bot kinodan yuboradi!
         else:
             bot.reply_to(message, "❌ Video fayli yuborish kerak!")
     except Exception as e:
-        bot.reply_to(message, f"❌ Xatolik: {str(e)}\n\nEski video nomini yozing yoki qayta urinib ko'ring.")
+        bot.reply_to(message, f"❌ Xatolik: {str(e)}")
 
 @bot.message_handler(commands=['kategoriyalar'])
 def show_categories(message):
@@ -591,26 +565,18 @@ def kino_chiqarish(message):
         return
     
     # Kinodan ma'lumotlar
-    kino_id, kino_kod, kino_nom, fayl_nomi, kategoriya, sana = kino
-    fayl_path = f'kinolar/{fayl_nomi}'
+    kino_id, kino_kod, kino_nom, file_id, kategoriya, sana = kino
     
-    # Fayl mavjudligini tekshiring
-    if not os.path.exists(fayl_path):
-        bot.reply_to(message, f"❌ Faylni topa olmadim: {fayl_nomi}")
-        return
-    
-    # Kinodan yuborish
+    # Kinodan yuborish - FILE_ID orqali (Telegram serverlaridan to'g'ridan-to'g'ri!)
     try:
-        # Buyuk fayllar uchun progress xabari
         status_msg = bot.send_message(user_id, f"⏳ {kino_nom} yuborilmoqda...")
         
-        with open(fayl_path, 'rb') as video:
-            bot.send_video(
-                user_id,
-                video,
-                caption=f"🎬 {kino_nom}\n📌 Kod: {kino_kod}\n📂 Kategoriya: {kategoriya}",
-                supports_streaming=True
-            )
+        bot.send_video(
+            user_id,
+            file_id,
+            caption=f"🎬 {kino_nom}\n📌 Kod: {kino_kod}\n📂 Kategoriya: {kategoriya}",
+            supports_streaming=True
+        )
         
         # Status xabarini o'chirish
         try:
